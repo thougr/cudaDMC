@@ -84,6 +84,9 @@ namespace {
                                        {5,  7, 1,  3},
                                        {10, 9, 11, 8}};
 
+    __device__ const int device_processEdgeMask[3][4] = {{6,  2, 4,  0},
+                                       {5,  7, 1,  3},
+                                       {10, 9, 11, 8}};
     const int directionCube[][6] = {
             // top,bottom,left,right,front,back
             {4,  14, 11, 1,  12, 2},
