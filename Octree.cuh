@@ -191,10 +191,10 @@ public:
         return type == Node_Internal;
     }
 
-    __device__ static bool calculateMDCRepresentative(Octree *root, Octree *templateRoot, OctreeRepresentative *allVertex, int globalIndex, double isovalue, int useOptimization=0);
+    __device__ static bool calculateMDCRepresentative(Octree *root, Octree *templateRoot, OctreeRepresentative *allVertex, int *globalIndex, double isovalue, int useOptimization=0);
 
     __device__ static bool invertSign(Octree *root, Octree *templateRoot, double isovalue);
-    __device__ static void calculateAccurateRepresentative(Octree *root, OctreeRepresentative *allVertex, int globalIndex, double isovalue, uint8_t sign, int clusterDisable);
+    __device__ static void calculateAccurateRepresentative(Octree *root, OctreeRepresentative *allVertex, int *globalIndex, double isovalue, uint8_t sign, int clusterDisable);
     __device__ static Octree<T,B>* findNeighbor(Octree *root, Direction dir);
 
     __host__ static void generateVerticesIndices(Octree *root,  vtkIncrementalPointLocator *locator, vtkDataArray* newScalars);

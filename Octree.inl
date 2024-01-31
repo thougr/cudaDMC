@@ -474,7 +474,7 @@ bool Octree<T,B>::invertSign(Octree *root, Octree *templateRoot, double isovalue
 }
 
 template<class T, class B>
-bool Octree<T, B>::calculateMDCRepresentative(Octree *root, Octree *templateRoot, OctreeRepresentative *allVertex, int globalIndex, double isovalue, int useOptimization) {
+bool Octree<T, B>::calculateMDCRepresentative(Octree *root, Octree *templateRoot, OctreeRepresentative *allVertex, int *globalIndex, double isovalue, int useOptimization) {
     if (!root) {
         return false;
     }
@@ -538,7 +538,7 @@ bool Octree<T, B>::calculateMDCRepresentative(Octree *root, Octree *templateRoot
 }
 
 template <class T, class B>
-void Octree<T, B>::calculateAccurateRepresentative(Octree *root, OctreeRepresentative *allVertex, int globalIndex, double isovalue, uint8_t sign, int clusterDisable) {
+void Octree<T, B>::calculateAccurateRepresentative(Octree *root, OctreeRepresentative *allVertex, int *globalIndex, double isovalue, uint8_t sign, int clusterDisable) {
     auto contoursTable = &r_pattern[(int)sign * 17];
     auto numContours = contoursTable[0];
     auto contourBegin = numContours + 1;
@@ -749,6 +749,7 @@ void Octree<T, B>::calculateAccurateRepresentative(Octree *root, OctreeRepresent
     glm::vec3 localMassPoints[4];
     glm::vec3 localNormals[4];
     OctreeRepresentative* representatives[4];
+    int index = atomicAdd(globalIndex, numContours);
 
     for (int i = 1; i <= numContours; i++) {
         int numsEdges = contoursTable[i];
@@ -808,7 +809,7 @@ void Octree<T, B>::calculateAccurateRepresentative(Octree *root, OctreeRepresent
             qefPos = qefPos;
         }
         // TODO choose qefPos or pt
-        OctreeRepresentative *representative = &allVertex[4 * globalIndex + i - 1];
+        OctreeRepresentative *representative = &allVertex[index + i - 1];
 //        OctreeRepresentative *representative = allVertex + 4 * globalIndex + i - 1;
         representative->averageNormal = glm::normalize(averageNormal);
         representative->qef = qefSolver.getData();

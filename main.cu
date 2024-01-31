@@ -31,14 +31,14 @@ int main() {
     ambiguousCasesComplementInit();
     std::vector<std::pair<std::string, double>> files = {
             {"data/boston_teapot.nhdr", 20.5},
-            {"data/skull.nhdr", 30},
-            {"data/foot.nhdr", 110.3},
-            {"data/vis_male.nhdr", 110.3},
-            {"data/carp.nhdr",1150.5}
+//            {"data/skull.nhdr", 30},
+//            {"data/foot.nhdr", 110.3},
+//            {"data/vis_male.nhdr", 110.3},
+//            {"data/carp.nhdr",1150.5}
     };
 
     double adaptiveThreshold = 0;
-    bool forceRewrite = false;
+    bool forceRewrite = true;
     for (auto &file : files) {
         auto i_file = file.first;
         double isoValue = file.second;

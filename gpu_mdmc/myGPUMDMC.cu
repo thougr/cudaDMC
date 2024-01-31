@@ -78,7 +78,48 @@ __host__ __device__ Octree<T,B> * getNeighbour(VoxelsData<T> *voxelsData, Octree
 }
 
 template<class T, class B>
-__global__ void generateLeafNodes(VoxelsData<T> *voxelsData, Octree<T,B> *leafNodes, int size, int depth, double isovalue, OctreeRepresentative *representatives) {
+__device__ bool addVertexCnt(Octree<T,B> *root, Octree<T,B> *templateRoot,  double isovalue, int *verticesCnt) {
+
+    if (!root) {
+        return false;
+    }
+
+    auto sign = root->sign;
+    bool ambiguous = isAmbiguousCase(sign);
+    if (ambiguous && !templateRoot) {
+        return false;
+    }
+
+    if (ambiguous && Octree<T,B>::invertSign(root, templateRoot, isovalue)) {
+        sign = ~sign;
+    }
+
+    auto contoursTable = &r_pattern[(int)sign * 17];
+    auto numContours = contoursTable[0];
+    atomicAdd(verticesCnt, numContours);
+    return true;
+}
+
+template<class T, class B>
+__global__ void generateLeafRepresentatives(VoxelsData<T> *voxelsData, Octree<T,B> *leafNodes, int size, double isovalue, OctreeRepresentative *representatives, int *verticesIndex) {
+    unsigned stride=gridDim.x * gridDim.y * gridDim.z * blockDim.x * blockDim.y * blockDim.z;
+    unsigned blockId = (gridDim.x * blockIdx.y) + blockIdx.x;
+    unsigned offset = (blockId * (blockDim.x * blockDim.y)) + (threadIdx.y * blockDim.x) + threadIdx.x;
+//    unsigned blockId = (gridDim.x * gridDim.y * blockIdx.z) + (gridDim.x * blockIdx.y) + blockIdx.x;
+//    unsigned offset = (blockId * (blockDim.x * blockDim.y * blockDim.z)) + (threadIdx.z * (blockDim.x * blockDim.y)) + (threadIdx.y * blockDim.x) + threadIdx.x;
+    for (int i = offset; i < size;i += stride) {
+        auto &leaf = leafNodes[i];
+        if (leaf.type == Node_None) {
+            continue;
+        }
+
+        Octree<T,B>::calculateMDCRepresentative(&leaf, &leaf, representatives, verticesIndex, isovalue, 1);
+    }
+
+}
+
+template<class T, class B>
+__global__ void generateLeafNodes(VoxelsData<T> *voxelsData, Octree<T,B> *leafNodes, int size, int depth, double isovalue, int *verticesCnt) {
     unsigned stride=gridDim.x * gridDim.y * gridDim.z * blockDim.x * blockDim.y * blockDim.z;
     unsigned blockId = (gridDim.x * blockIdx.y) + blockIdx.x;
     unsigned offset = (blockId * (blockDim.x * blockDim.y)) + (threadIdx.y * blockDim.x) + threadIdx.x;
@@ -151,10 +192,12 @@ __global__ void generateLeafNodes(VoxelsData<T> *voxelsData, Octree<T,B> *leafNo
         if (leaf.maxScalar < isovalue || leaf.minScalar > isovalue) {
             leafNodes[i].type = Node_None;
         } else {
-            Octree<T,B>::calculateMDCRepresentative(&leaf, &leaf, representatives, i, isovalue, 1);
+            addVertexCnt(&leaf, &leaf, isovalue, verticesCnt);
+//            Octree<T,B>::calculateMDCRepresentative(&leaf, &leaf, representatives, i, isovalue, 1);
         }
     }
 }
+
 
 template<class T, class B>
 __global__ void generateInternalNodes(VoxelsData<T> *voxelsData, Octree<T,B> *internalNodes, Octree<T,B> *childrenNodes,
@@ -204,6 +247,7 @@ __global__ void generateInternalNodes(VoxelsData<T> *voxelsData, Octree<T,B> *in
             if (leaf.children[j]->minScalar < minScalar) {
                 minScalar = leaf.children[j]->minScalar;
             }
+            leaf.children[j]->parent = &leaf;
         }
         leaf.maxScalar = maxScalar;
         leaf.minScalar = minScalar;
@@ -602,6 +646,8 @@ namespace {
             auto start = std::chrono::high_resolution_clock::now();;
             OctreeType *leafNodes = nullptr;
             OctreeRepresentative *octreeRepresentatives = nullptr;
+            int *leafVertexCnt;
+            int *leafVertexIndex;
             int leafNum = size.x * size.y * size.z;
             {
 //                Region region = {.origin = {0, 0, 0}, .size = size,
@@ -609,14 +655,22 @@ namespace {
                 long long nByte = 1ll * sizeof(OctreeType) * leafNum;
                 cudaMallocManaged((void**)&leafNodes, nByte);
                 cudaMemset(leafNodes, 0, nByte);
-                nByte = 4ll * sizeof(OctreeRepresentative) * leafNum;
-                cudaMallocManaged((void**)&octreeRepresentatives, nByte);
-                generateLeafNodes<<<grid, block>>>(deviceData, leafNodes, leafNum, height, value, octreeRepresentatives);
+                cudaMallocManaged(&leafVertexCnt, sizeof(int));
+                cudaMemset(leafVertexCnt, 0, sizeof(int));
+                cudaMallocManaged(&leafVertexIndex, sizeof(int));
+                cudaMemset(leafVertexIndex, 0, sizeof(int));
+                generateLeafNodes<<<grid, block>>>(deviceData, leafNodes, leafNum, height, value, leafVertexCnt);
                 auto error = cudaDeviceSynchronize();
                 // print the error
                 if (error != cudaSuccess) {
                     std::cout << cudaGetErrorString(error) << std::endl;
                 }
+                std::cout << "叶子节点顶点数量:" << leafVertexCnt[0] << std::endl;
+                nByte =  sizeof(OctreeRepresentative) * leafVertexCnt[0];
+                cudaMallocManaged((void**)&octreeRepresentatives, nByte);
+                generateLeafRepresentatives<<<grid, block>>>(deviceData, leafNodes, leafNum, value, octreeRepresentatives, leafVertexIndex);
+                cudaDeviceSynchronize();
+                std::cout << "实际叶子节点顶点数量:" << leafVertexIndex[0] << std::endl;
             }
 
             {
@@ -762,6 +816,8 @@ namespace {
             cudaFree(quadCnt);
             cudaFree(tris);
             cudaFree(trisIndex);
+            cudaFree(leafVertexCnt);
+            cudaFree(leafVertexIndex);
         }
     };
 
