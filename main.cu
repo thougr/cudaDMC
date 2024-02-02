@@ -16,6 +16,7 @@
 #include "glm/glm.hpp"
 #include "gpu_mdmc/myGPUMDMC.cuh"
 #include "cuda_tmc/vtk/gpuMC.cuh"
+#include "dmc/vtk/gpuDMC.cuh"
 
 #include <filesystem>
 
@@ -116,7 +117,8 @@ int main() {
         double isoValue = file.second;
         std::vector<vtkSmartPointer<isosurfacesAlgorithm>> surfaces = {
 //        vtkNew<myGPUMDMC>(),
-            vtkNew<gpuMC>()
+//            vtkNew<gpuMC>(),
+                    vtkNew<gpuDMC>()
         };
 
         for (auto &surface : surfaces) {

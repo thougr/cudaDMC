@@ -38,7 +38,44 @@ add_executable(cudaDMC main.cu Octree.cuh qef.cu qef.cuh svd.cu svd.cuh Octree.i
         UnionFind.h
         cuda_tmc/MarchingCubes.cu
         cuda_tmc/vtk/gpuMC.cu
-        cuda_tmc/vtk/gpuMC.cuh)
+        cuda_tmc/vtk/gpuMC.cuh
+        dmc/vtk/gpuDMC.cu
+        dmc/vtk/gpuDMC.cuh
+        dmc/CellIntersection.h
+        dmc/CTimer.h
+        dmc/DualMarchingCubes.cu
+        dmc/EdgeHashTable.h
+        dmc/Edges.h
+        dmc/ElementQuality.h
+        dmc/EstimateElementQuality.cu
+        dmc/EstimateElementQuality.h
+        dmc/FaceColoring.cu
+        dmc/FaceColoring.h
+        dmc/HalfedgeFaces.h
+        dmc/HalfedgeMesh.cu
+        dmc/HalfedgeHashTable.h
+        dmc/HalfedgeMesh.h
+        dmc/Halfedges.h
+        dmc/HalfedgeVertices.h
+        dmc/kernel.cu
+        dmc/MarchingCubesLookupTables.h
+        dmc/MCPolygon.h
+        dmc/MeshSimplification.cu
+        dmc/MeshSimplification.h
+        dmc/QuadrilateralMap.h
+        dmc/QuadrilateralHashTable.h
+        dmc/Quadrilaterals.h
+        dmc/QualityMeasure.h
+        dmc/Triangles.h
+        dmc/UniformGrid.cu
+        dmc/ValenceHashTable.h
+        dmc/VertexHashTable.h
+        dmc/VertexMap.h
+        dmc/VertexRepresentative.h
+        dmc/VertexValence.cu
+        dmc/VertexValence.h
+        dmc/Vertices.h
+)
 target_compile_options(cudaDMC PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda>)
 add_dependencies(cudaDMC copy_data)
 set_target_properties(cudaDMC PROPERTIES

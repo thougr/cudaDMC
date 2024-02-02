@@ -88,6 +88,14 @@ namespace p_mc {
         /// <param name="dim">Size of volume data</param>
         /// <param name="sc">Specify which predefined scalar function has to be used</param>
         void init(const std::array<int, 3>& dim, SurfaceCase sc) { ugrid.generateVolume(dim, sc); }
+
+        /// <summary>
+        /// Initialize volume data from vtk
+        /// </summary>
+        void init(const int dims[3], vtkDataArray* scalarsArray) {
+            ugrid.initializeGrid(dims, scalarsArray);
+        }
+
         /// <summary>
         /// clear all host arrays
         /// </summary>

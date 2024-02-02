@@ -24,6 +24,8 @@
 #include <device_launch_parameters.h>
 
 #include "helper_cuda.h"
+#include <vtkDataArray.h>
+#include <vtkDataArrayRange.h>
 
 namespace p_mc {
     /// <summary>
@@ -459,6 +461,29 @@ namespace p_mc {
             //
             setScalar(h_volume);
             delete[] h_volume;
+        }
+
+        __host__ void initializeGrid(const int dims[3], vtkDataArray* scalarsArray) {
+            idim = dims[0];
+            jdim = dims[1];
+            kdim = dims[2];
+            x0 = 0;
+            y0 = 0;
+            z0 = 0;
+            dx = 1;
+            dy = 1;
+            dz = 1;
+            const auto scalars = vtk::DataArrayValueRange<1>(scalarsArray);
+            size_t size_ = scalars.size();
+            float* h_volume = new float[size_];
+
+            for (int index = 0; index < size_; index++) {
+                h_volume[index] = scalars[index];
+            }
+            //
+            setScalar(h_volume);
+            delete[] h_volume;
+
         }
     };
 }// namespace
