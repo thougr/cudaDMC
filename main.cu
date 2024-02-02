@@ -15,6 +15,7 @@
 #define GLM_FORCE_CUDA
 #include "glm/glm.hpp"
 #include "gpu_mdmc/myGPUMDMC.cuh"
+#include "cuda_tmc/gpuMC.cuh"
 
 #include <filesystem>
 
@@ -39,7 +40,7 @@ int main() {
 
     double adaptiveThreshold = 0.f;
     bool forceRewrite = true;
-    bool writeConsoleToFile = true;
+    bool writeConsoleToFile = false;
     for (auto &file : files) {
         auto i_file = file.first;
         double isoValue = file.second;
@@ -50,7 +51,8 @@ int main() {
         vtkNew<vtkImageData> volume;
         volume->DeepCopy(nrrdReader->GetOutput());
         auto dims = volume->GetDimensions();
-        vtkNew<myGPUMDMC> surface;
+//        vtkNew<myGPUMDMC> surface;
+        vtkNew<gpuMC> surface;
         surface->SetAdaptiveThreshold(adaptiveThreshold);
         surface->SetInputData(volume);
 //    surface->ComputeNormalsOn();

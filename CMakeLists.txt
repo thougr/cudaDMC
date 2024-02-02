@@ -35,7 +35,10 @@ add_executable(cudaDMC main.cu Octree.cuh qef.cu qef.cuh svd.cu svd.cuh Octree.i
         gpu_mdmc/myGPUMDMC.cu
         gpu_mdmc/myGPUMDMC.cuh
         table.cu
-        UnionFind.h)
+        UnionFind.h
+        cuda_tmc/MarchingCubes.cu
+        cuda_tmc/gpuMC.cu
+        cuda_tmc/gpuMC.cuh)
 target_compile_options(cudaDMC PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda>)
 add_dependencies(cudaDMC copy_data)
 set_target_properties(cudaDMC PROPERTIES

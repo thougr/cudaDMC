@@ -36,7 +36,6 @@ vtkStandardNewMacro(myGPUMDMC);
 #include "cuda_runtime.h"
 #include <cuda_runtime_api.h>
 #include <driver_types.h>
-#include "../UnionFind.cuh"
 
 __host__ __device__ glm::vec3 convertToRelative(Direction dir) {
     glm::vec3 v(0, 0, 0);
