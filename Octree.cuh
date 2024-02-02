@@ -19,6 +19,7 @@
 #include "common.cuh"
 #include <stdgpu/functional.h>
 
+template <typename T>
 class UnionFind;
 
 template <class T, class B>
@@ -92,17 +93,6 @@ struct OctreeRepresentative {
 
 };
 
-//namespace stdgpu {
-//    template<>
-//    struct hash<OctreeRepresentative*> {
-//        size_t operator()(const OctreeRepresentative* representative) const {
-//             return std::hash<std::uintptr_t>()(reinterpret_cast<std::uintptr_t>(representative));
-//        }
-//    };
-//
-//}
-class UnionFind;
-
 template <class T, class B>
 class Octree {
 public:
@@ -120,7 +110,8 @@ public:
     glm::vec3 normal[8];
     uint8_t sign;
     OctreeRepresentative *representative[12];
-    // use for clustering in parallel
+
+    std::vector<OctreeRepresentative*> *clusteredVertex;
     OctreeRepresentative *representativeBegin;
     int clusteredVertexCnt;
 
@@ -155,6 +146,7 @@ public:
         for (int i = 0; i < 12; i++) {
             representative[i] = nullptr;
         }
+        clusteredVertex = nullptr;
     }
     __host__ __device__ Octree(int depth, int index, Region region, Octree* parent, OctreeNodeType type) {
         for (int i = 0; i < 8; i++) {
@@ -176,6 +168,7 @@ public:
         for (int i = 0; i < 12; i++) {
             representative[i] = nullptr;
         }
+        clusteredVertex = nullptr;
     }
 
     __host__ __device__ Octree(int depth, int height, int index, Region region, Octree* parent, OctreeNodeType type) {
@@ -199,6 +192,7 @@ public:
         for (int i = 0; i < 12; i++) {
             representative[i] = nullptr;
         }
+        clusteredVertex = nullptr;
     }
 
 
@@ -226,13 +220,22 @@ public:
 
     __device__ static bool invertSign(Octree *root, Octree *templateRoot, double isovalue);
     __device__ static void calculateAccurateRepresentative(Octree *root, OctreeRepresentative *allVertex, int *globalIndex, double isovalue, uint8_t sign, int clusterDisable);
-    __device__ static Octree<T,B>* findNeighbor(Octree *root, Direction dir);
+    __host__ __device__ static Octree<T,B>* findNeighbor(Octree *root, Direction dir);
 
     __host__ static void generateVerticesIndices(Octree *root,  vtkIncrementalPointLocator *locator, vtkDataArray* newScalars);
     __host__ static void contourCellProc(Octree *root, vtkCellArray* newPolys, int useOptimization=0);
     __host__ static void contourFaceProc(Octree *root[2], int dir, vtkCellArray* newPolys, int useOptimization=0);
     __host__ static void contourEdgeProc(Octree *root[4], int dir, vtkCellArray* newPolys, int useOptimization=0);
     __host__ static void contourProcessEdge(Octree *root[4], int dir, vtkCellArray* newPolys, int useOptimization=0);
+
+
+    __host__ static void clusterCell(Octree *root, double threshold, int useOptimization=0);
+    __host__ static void clusterFace(Octree *root[2], int dir, UnionFind<OctreeRepresentative*> &unionFind, int useOptimization=0);
+    __host__ static void clusterEdge(Octree *root[4], int dir, UnionFind<OctreeRepresentative*> &unionFind, int useOptimization=0);
+    __host__ static void clusterVertex(Octree *root[4], int dir, UnionFind<OctreeRepresentative*> &unionFind, int useOptimization=0);
+    __host__ static void handleAmbiguous(Octree *root);
+    __host__ static void destroyOctree(Octree *root);
+
 };
 
 #include "Octree.inl"

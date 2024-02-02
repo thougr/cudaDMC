@@ -856,7 +856,7 @@ const unsigned char t_ambig[256] = {
         255 // quitte: 255 <-> mc: 255, class representative: 0
 };
 
-__device__ const int externalEdges[][3] = {
+const int externalEdges[][3] = {
         {0, 3, 8},
         {0, 1, 9},
         {2, 3, 11},
@@ -867,7 +867,7 @@ __device__ const int externalEdges[][3] = {
         {6, 5, 10},
 };
 
-__device__ const int internalEdge[][9] = {
+const int internalEdge[][9] = {
         {1, 2, 4, 5, 6, 7, 9, 10, 11},
         {2, 3, 4, 5, 6, 7, 8, 10, 11},
         {0, 1, 4, 5, 6, 7, 8, 9, 10},
@@ -880,6 +880,8 @@ __device__ const int internalEdge[][9] = {
 
 __device__ const unsigned short e_face[6][4] = {{3, 2, 1, 0}, {5, 6, 7, 4}, {8, 0, 9, 4},
                                {11, 6, 10, 2}, {7, 11, 3, 8}, {1, 10, 5, 9}};
+const unsigned short h_e_face[6][4] = {{3, 2, 1, 0}, {5, 6, 7, 4}, {8, 0, 9, 4},
+                                                {11, 6, 10, 2}, {7, 11, 3, 8}, {1, 10, 5, 9}};
 __device__ const unsigned short v_face[6][4] = {{0, 2, 1, 3}, {5, 7, 4, 6}, {4, 0, 5, 1},
                                {2, 6, 3, 7}, {4, 6, 0, 2}, {1, 3, 5, 7}};
 

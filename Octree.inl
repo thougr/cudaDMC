@@ -7,6 +7,7 @@
 #include "common.cuh"
 #include "table.cuh"
 //#include "nlopt.hpp"
+#include "UnionFind.h"
 
 
 namespace {
@@ -314,7 +315,7 @@ namespace {
         }
         return direction;
     }
-    Direction reverseDirection(Direction dir) {
+    __host__ __device__ Direction reverseDirection(Direction dir) {
         return static_cast<Direction>(dir ^ 0x1);
     }
 
@@ -1147,4 +1148,385 @@ void Octree<T, B>::contourProcessEdge(Octree<T, B> *root[4], int dir, vtkCellArr
             }
         }
     }
+}
+
+template<class T, class B>
+void Octree<T, B>::clusterCell(Octree *root, double threshold, int useOptimization) {
+    if (!root) {
+        return;
+    }
+
+    if (isLeaf(root)) {
+        return;
+    }
+
+    for (int i = 0; i < 8; i++) {
+        clusterCell(root->children[i], threshold, useOptimization);
+    }
+
+    UnionFind<OctreeRepresentative*> unionFind;
+    for (int i = 0; i < 12; i++) {
+        Octree<T, B> *nodes[2];
+        const int c[2] = {cellProcFaceMask[i][0], cellProcFaceMask[i][1]};
+        nodes[0] = root->children[c[0]];
+        nodes[1] = root->children[c[1]];
+        clusterFace(nodes, cellProcFaceMask[i][2], unionFind, useOptimization);
+    }
+
+    Octree<T, B> *n[2][2] = {{nullptr, root}, {root, nullptr}};
+    for (int dir = 0; dir < 3; dir++) {
+        for (int i = 0; i < 2; i++) {
+            Octree<T, B> *nodes[2] = {n[i][0], n[i][1]};
+            clusterFace(nodes, dir, unionFind, useOptimization);
+        }
+    }
+
+    for (int i = 0; i < 6; i++) {
+        Octree<T, B> *nodes[4];
+        const int c[4] = {cellProcEdgeMask[i][0], cellProcEdgeMask[i][1], cellProcEdgeMask[i][2], cellProcEdgeMask[i][3]};
+        for (int j = 0; j < 4; j++) {
+            nodes[j] = root->children[c[j]];
+        }
+        clusterEdge(nodes, cellProcEdgeMask[i][4], unionFind, useOptimization);
+    }
+
+    // cluster begin
+    // the vertex that are not in the unionFind are need to be added to a one-element new set
+    for (int i = 0; i < 8; i++) {
+        auto child = root->children[i];
+        if (!child) {
+            continue;
+        }
+        if (child->type == OctreeNodeType::Node_Leaf) {
+            for (int j = 0; j < 12; j++) {
+                if (!child->representative[j]) {
+                    continue;
+                }
+                auto vertex = child->representative[j];
+                unionFind.addElement(vertex);
+            }
+        } else {
+            for (auto &vertex : child->clusteredVertex[0]) {
+                if (!vertex) {
+                    continue;
+                }
+                unionFind.addElement(vertex);
+            }
+        }
+    }
+
+    auto disjointSets = unionFind.getDisjointSets();
+//    bool allCollapsible = true;
+    int vertexCnt = 0;
+
+    root->clusteredVertex = new std::vector<OctreeRepresentative*>();
+    root->collapsible = true;
+    for (auto &it : disjointSets) {
+        auto representative = it.first;
+        auto set = it.second;
+        svd::QefSolver qefSolver;
+        glm::vec3 normal(0, 0, 0);
+        int edgeIntersection[12];
+        int internalIntersection = 0;
+        int euler = 0;
+        for (int i = 0; i < 12; i++) {
+            edgeIntersection[i] = 0;
+        }
+        bool canMerge = true;
+        int mergeNode = 0;
+        for (auto &node : set) {
+            for (int i = 0; i < 3; i++) {
+                int edge = externalEdges[node->cellIndex][i];
+                edgeIntersection[edge] += node->edgeIntersection[edge];
+            }
+
+            qefSolver.add(node->qef);
+            normal += node->averageNormal;
+            for (int i = 0; i < 9; i++) {
+                int edge = internalEdge[node->cellIndex][i];
+                internalIntersection += node->edgeIntersection[edge];
+            }
+            euler += node->euler;
+            if (!node->canMerge) {
+                canMerge = false;
+            }
+            mergeNode++;
+        }
+        if (!mergeNode) {
+            continue;
+        }
+        svd::Vec3 qefPosition;
+        qefSolver.solve(qefPosition, QEF_ERROR, QEF_SWEEPS, QEF_ERROR);
+        auto error = qefSolver.getError();
+        glm::vec3 position(qefPosition.x, qefPosition.y, qefPosition.z);
+
+        if (!inRegion(position, root->region)) {
+            const auto &mp = qefSolver.getMassPoint();
+            position = glm::vec3(mp.x, mp.y, mp.z);
+            error = qefSolver.getError(mp);
+        }
+
+        bool edgeManifold = true;
+        for (int f = 0; f < 6; f++) {
+            int intersections = 0;
+            for (int i = 0; i < 4; i++) {
+                intersections += edgeIntersection[h_e_face[f][i]];
+            }
+            if (intersections != 0 && intersections != 2) {
+                edgeManifold = false;
+                break;
+            }
+        }
+
+        OctreeRepresentative *newRepresentative = nullptr;
+        cudaMallocManaged(&newRepresentative, sizeof(OctreeRepresentative));
+        *newRepresentative = OctreeRepresentative();
+        newRepresentative->position = position;
+        newRepresentative->qef = qefSolver.getData();
+        newRepresentative->averageNormal = glm::normalize(normal);
+        newRepresentative->euler = euler - internalIntersection / 4;
+        newRepresentative->collapsible = error <= threshold && newRepresentative->euler == 1 && edgeManifold ;
+//        newRepresentative->collapsible = error <= threshold && newRepresentative->euler != 0;
+//        newRepresentative->collapsible = error <= threshold;
+//        newRepresentative->collapsible =  newRepresentative->euler > 0  ;
+
+//        newRepresentative->collapsible = edgeManifold;
+        newRepresentative->cellIndex = root->index;
+        newRepresentative->internalInters = internalIntersection;
+        newRepresentative->canMerge = canMerge;
+        newRepresentative->height = root->height;
+        if (!newRepresentative->collapsible || !canMerge) {
+            root->collapsible = false;
+        }
+        for (int i = 0; i < 12; i++) {
+            newRepresentative->edgeIntersection[i] = edgeIntersection[i];
+        }
+        for (auto &node : set) {
+//            if (!node->canMerge) continue;
+            node->parent = newRepresentative;
+//            newRepresentative->child.push_back(node);
+        }
+
+        newRepresentative = newRepresentative;
+        vertexCnt++;
+        // only used to free the memory
+        root->clusteredVertex->push_back( newRepresentative);
+    }
+
+}
+
+template<class T, class B>
+void Octree<T,B>::clusterFace(Octree *root[2], int dir, UnionFind<OctreeRepresentative*> & unionFind, int useOptimization) {
+    if (!root[0] && !root[1]) {
+        return;
+    }
+
+    if ( (root[0] == nullptr || isLeaf(root[0])) && (root[1] == nullptr || isLeaf(root[1])) ) {
+        return;
+    }
+
+    for (int i = 0; i < 4; i++) {
+        Octree<T, B> *nodes[2];
+        const int c[2] = {faceProcFaceMask[dir][i][0], faceProcFaceMask[dir][i][1]};
+        for (int j = 0; j < 2; j++) {
+            if (!root[j]) {
+                nodes[j] = nullptr;
+                continue;
+            }
+            if (isLeaf(root[j])) {
+                nodes[j] = root[j];
+            } else {
+                nodes[j] = root[j]->children[c[j]];
+            }
+        }
+        clusterFace(nodes, faceProcFaceMask[dir][i][2], unionFind, useOptimization);
+    }
+
+    const int orders[2][4] =
+            {
+                    { 0, 0, 1, 1 },
+                    { 0, 1, 0, 1 },
+            };
+
+    for (int i = 0; i < 4; i++) {
+        Octree<T, B> *nodes[4];
+        const int c[4] = {faceProcEdgeMask[dir][i][1], faceProcEdgeMask[dir][i][2], faceProcEdgeMask[dir][i][3], faceProcEdgeMask[dir][i][4]};
+        const int* order = orders[faceProcEdgeMask[dir][i][0]];
+        for (int j = 0; j < 4; j++) {
+            if (!root[order[j]]) {
+                nodes[j] = nullptr;
+                continue;
+            }
+            if (isLeaf(root[order[j]])) {
+                nodes[j] = root[order[j]];
+            }
+            else {
+                nodes[j] = root[order[j]]->children[c[j]];
+            }
+        }
+        clusterEdge(nodes, faceProcEdgeMask[dir][i][5], unionFind, useOptimization);
+    }
+
+}
+
+template<class T, class B>
+void Octree<T,B>::clusterEdge(Octree *root[4], int dir, UnionFind<OctreeRepresentative*> & unionFind, int useOptimization) {
+
+    if (!root[0] && !root[1] && !root[2] && !root[3]) {
+        return;
+    }
+
+    bool canCluster = true;
+    for (int i = 0; i < 4; i++) {
+        if (root[i] && isInternal(root[i])) {
+            canCluster = false;
+        }
+    }
+
+    if (canCluster) {
+        clusterVertex(root, dir, unionFind, useOptimization);
+    } else {
+        for (int i = 0; i < 2; i++) {
+            Octree<T, B> *nodes[4];
+            const int c[4] = {edgeProcEdgeMask[dir][i][0], edgeProcEdgeMask[dir][i][1], edgeProcEdgeMask[dir][i][2], edgeProcEdgeMask[dir][i][3]};
+            for (int j = 0; j < 4; j++) {
+                if (!root[j]) {
+                    nodes[j] = nullptr;
+                    continue;
+                }
+                if (isLeaf(root[j])) {
+                    nodes[j] = root[j];
+                } else {
+                    nodes[j] = root[j]->children[c[j]];
+                }
+            }
+            clusterEdge(nodes, edgeProcEdgeMask[dir][i][4], unionFind, useOptimization);
+        }
+    }
+}
+
+template<class T, class B>
+void Octree<T,B>::clusterVertex(Octree<T, B> *root[4], int dir, UnionFind<OctreeRepresentative*> &unionFind, int useOptimization) {
+
+    int minIndex = 0;
+    long long indices[4] = {-1, -1, -1, -1};
+    bool flip = false;
+    bool signChange[4] = {false, false, false, false};
+
+    OctreeRepresentative *previous = nullptr;
+    for (int i = 0; i < 4; i++) {
+        if (!root[i]) {
+            continue;
+        }
+        const int edge = processEdgeMask[dir][i];
+        int c1 = edges2Vertices[edge][0];
+        int c2 = edges2Vertices[edge][1];
+        auto m1 = (root[i]->sign >> c1) & 1;
+        auto m2 = (root[i]->sign >> c2) & 1;
+        if (m1 ^ m2) {
+            auto vertex = root[i]->representative[edge];
+            while (vertex->parent) {
+                vertex = vertex->parent;
+            }
+            if (!previous /**&& vertex->canMerge**/ ) {
+                previous = vertex;
+            }
+            unionFind.addElement(vertex);
+//            if (vertex->canMerge)
+            unionFind.unionSets(previous, vertex);
+        }
+    }
+
+    for (int i = 0; i < 4; i++) {
+        if (!root[i]) {
+            continue;
+        }
+        if (useOptimization == 1) {
+            handleAmbiguous(root[i]);
+        }
+    }
+}
+
+template<class T, class B>
+void Octree<T, B>::handleAmbiguous(Octree *root) {
+    auto sign = root->sign;
+    if (!isAmbiguousCase(sign)) {
+        // not ambiguous case
+        return;
+    }
+    auto dir = ambiguousFaces[~sign];
+    Direction direction = convertToDirection(dir);
+    // new tree has not been built completely, so use template tree
+    auto neighbor = findNeighbor(root, direction);
+    if (!neighbor) {
+        return;
+    }
+    auto neighborSign = neighbor->sign;
+    if (isAmbiguousCase(neighborSign)) {
+        // two adjacent ambiguous faces can be handled properly
+        return;
+    }
+    std::unordered_set<OctreeRepresentative*> vs;
+    auto f = h_e_face[convertToFace(direction)];
+    for (int j = 0; j < 4; j++) {
+        vs.insert(root->representative[f[j]]);
+    }
+    if (vs.size() != 1) {
+        std::cout << "octree representative error happen" << std::endl;
+        return;
+    }
+    auto ambVertex = *vs.begin();
+    auto face = convertToFace(reverseDirection(direction));
+    auto edges = h_e_face[face];
+    vs.clear();
+    for (int j = 0; j < 4; j++) {
+        vs.insert(neighbor->representative[edges[j]]);
+    }
+    if (vs.size() != 2) {
+        std::cout << "octree representative error happen!!" << std::endl;
+        return;
+    }
+    auto commonV1 = findCommonAncestor(*vs.begin(), *std::next(vs.begin()));
+    if (!commonV1) {
+        // not clustering to a vertex
+        return;
+    }
+    auto commonV2 = findCommonAncestor(commonV1, ambVertex);
+    while (commonV1 && commonV1 != commonV2) {
+        commonV1->collapsible = false;
+        commonV1 = commonV1->parent;
+    }
+}
+
+template<class T, class B>
+void Octree<T, B>::destroyOctree(Octree *root) {
+    if (!root) {
+        return;
+    }
+
+    if (!isLeaf(root)) {
+        for (int i = 0; i < 8; i++) {
+            destroyOctree(root->children[i]);
+            root->children[i] = nullptr;
+        }
+        if (!root->clusteredVertex) {
+            return;
+        }
+        auto clusteredVertex = root->clusteredVertex[0];
+        std::unordered_set<OctreeRepresentative *> deleteVertices;
+        for (int i = 0; i < clusteredVertex.size(); i++) {
+            if (!clusteredVertex[i]) {
+                continue;
+            }
+            // check if the vertex is already deleted
+            if (deleteVertices.find(clusteredVertex[i]) == deleteVertices.end()) {
+                deleteVertices.insert(clusteredVertex[i]);
+//                delete root->clusteredVertex[i];
+                cudaFree(clusteredVertex[i]);
+            }
+            clusteredVertex[i] = nullptr;
+        }
+        delete root->clusteredVertex;
+    }
+
 }

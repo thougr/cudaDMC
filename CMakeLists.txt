@@ -9,19 +9,6 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(VTK REQUIRED)
 find_package(NLopt REQUIRED)
-include(FetchContent)
-FetchContent_Declare(
-        stdgpu
-        GIT_REPOSITORY https://github.com/stotko/stdgpu.git
-        GIT_TAG        master
-)
-
-# Exclude unneeded parts from the build
-set(STDGPU_BUILD_EXAMPLES OFF CACHE INTERNAL "")
-set(STDGPU_BUILD_BENCHMARKS OFF CACHE INTERNAL "")
-set(STDGPU_BUILD_TESTS OFF CACHE INTERNAL "")
-
-FetchContent_MakeAvailable(stdgpu)
 
     # print version
 message(STATUS "CUDA version: ${CUDA_VERSION}")
@@ -48,12 +35,11 @@ add_executable(cudaDMC main.cu Octree.cuh qef.cu qef.cuh svd.cu svd.cuh Octree.i
         gpu_mdmc/myGPUMDMC.cu
         gpu_mdmc/myGPUMDMC.cuh
         table.cu
-        UnionFind.cuh
-        UnionFindGPU.cuh)
+        UnionFind.h)
 target_compile_options(cudaDMC PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda>)
 add_dependencies(cudaDMC copy_data)
 set_target_properties(cudaDMC PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON
 #        COMPILE_OPTIONS -G
 )
-target_link_libraries(cudaDMC ${VTK_LIBRARIES} ${NLOPT_LIBRARIES} stdgpu::stdgpu)
+target_link_libraries(cudaDMC ${VTK_LIBRARIES} ${NLOPT_LIBRARIES})

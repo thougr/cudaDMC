@@ -37,9 +37,9 @@ int main() {
 //            {"data/carp.nhdr",1150.5}
     };
 
-    double adaptiveThreshold = 100.f;
+    double adaptiveThreshold = 0.f;
     bool forceRewrite = true;
-    bool writeConsoleToFile = false;
+    bool writeConsoleToFile = true;
     for (auto &file : files) {
         auto i_file = file.first;
         double isoValue = file.second;
