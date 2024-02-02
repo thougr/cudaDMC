@@ -15,7 +15,7 @@
 #define GLM_FORCE_CUDA
 #include "glm/glm.hpp"
 #include "gpu_mdmc/myGPUMDMC.cuh"
-#include "cuda_tmc/gpuMC.cuh"
+#include "cuda_tmc/vtk/gpuMC.cuh"
 
 #include <filesystem>
 
@@ -26,6 +26,76 @@ void writeToFile(const std::string &i_file, vtkSmartPointer<vtkPolyDataAlgorithm
     writer->Write();
 }
 
+void useVTK(double isoValue, const std::string &i_file, bool needVisualize, isosurfacesAlgorithm *sf = nullptr, double adaptiveThreshold = 0.0f,
+            bool forceRewrite = false, bool writeConsoleToFile = false) {
+    std::cout << "Processing" << i_file << std::endl;
+    vtkNew<vtkNrrdReader> nrrdReader;
+    nrrdReader->SetFileName(i_file.c_str());
+    nrrdReader->Update();
+    vtkNew<vtkImageData> volume;
+    volume->DeepCopy(nrrdReader->GetOutput());
+    auto dims = volume->GetDimensions();
+    auto surface = sf;
+//        vtkNew<myGPUMDMC> surface;
+//    vtkNew<gpuMC> surface;
+    surface->SetAdaptiveThreshold(adaptiveThreshold);
+    surface->SetInputData(volume);
+//    surface->ComputeNormalsOn();
+    surface->ComputeNormalsOff();
+    surface->SetValue(0, isoValue);
+
+
+    std::string outputPath = "output";
+    std::string consolePath = "console";
+
+    if (!std::filesystem::exists(outputPath)) {
+        std::filesystem::create_directories(outputPath);
+    }
+    if (!std::filesystem::exists(consolePath)) {
+        std::filesystem::create_directories(consolePath);
+    }
+    std::string surfaceType = typeid(*surface).name();
+    std::string fileName = std::filesystem::path(i_file).stem();
+    std::string outputName = surfaceType + "_" + fileName  + "_"
+                             + std::to_string((int)isoValue) + "_" + std::to_string((int)adaptiveThreshold);
+    auto consoleFilename = consolePath + "/" + outputName + ".txt";
+    if (!forceRewrite && std::filesystem::exists(consoleFilename)) {
+        std::cout << "file already exists, skip:" << consoleFilename << std::endl;
+        return;
+    }
+
+    std::ofstream consoleFile(consoleFilename);
+    if (!consoleFile || !consoleFile.is_open()) {
+        std::cout << "open console file fail" << std::endl;
+        return;
+    }
+    std::streambuf* originalCoutBuffer = std::cout.rdbuf();
+    if (writeConsoleToFile) {
+        std::cout.rdbuf(consoleFile.rdbuf()); // 将输出重定向到consoleFile
+    }
+
+    {
+        surface->Update();
+    }
+
+    auto pointCnt = surface->GetOutput()->GetNumberOfPoints();
+    auto cellCnt = surface->GetOutput()->GetNumberOfCells();
+    std::cout << "Number of surface point: " << pointCnt << std::endl;
+    std::cout << "Number of surface cells: " << cellCnt << std::endl;
+    if (!pointCnt || !cellCnt) {
+        std::cout << "No surface generated" << std::endl;
+        return;
+    }
+
+    std::cout.rdbuf(originalCoutBuffer); // 将输出重定向回来
+    consoleFile.close();
+//        const std::string i_file = "test.obj";
+    {
+        std::string objName = outputPath + "/" + outputName + ".obj";
+        writeToFile(objName, surface);
+        std::cout << "Writing " << objName << std::endl;
+    }
+}
 
 int main() {
     ambiguousFacesInit();
@@ -44,82 +114,20 @@ int main() {
     for (auto &file : files) {
         auto i_file = file.first;
         double isoValue = file.second;
-        std::cout << "Processing" << i_file << std::endl;
-        vtkNew<vtkNrrdReader> nrrdReader;
-        nrrdReader->SetFileName(i_file.c_str());
-        nrrdReader->Update();
-        vtkNew<vtkImageData> volume;
-        volume->DeepCopy(nrrdReader->GetOutput());
-        auto dims = volume->GetDimensions();
-//        vtkNew<myGPUMDMC> surface;
-        vtkNew<gpuMC> surface;
-        surface->SetAdaptiveThreshold(adaptiveThreshold);
-        surface->SetInputData(volume);
-//    surface->ComputeNormalsOn();
-        surface->ComputeNormalsOff();
-        surface->SetValue(0, isoValue);
+        std::vector<vtkSmartPointer<isosurfacesAlgorithm>> surfaces = {
+//        vtkNew<myGPUMDMC>(),
+            vtkNew<gpuMC>()
+        };
 
-
-        std::string outputPath = "output";
-        std::string consolePath = "console";
-
-        if (!std::filesystem::exists(outputPath)) {
-            std::filesystem::create_directories(outputPath);
-        }
-        if (!std::filesystem::exists(consolePath)) {
-            std::filesystem::create_directories(consolePath);
-        }
-        std::string surfaceType = typeid(*surface).name();
-        std::string fileName = std::filesystem::path(i_file).stem();
-        std::string outputName = surfaceType + "_" + fileName  + "_"
-                                 + std::to_string((int)isoValue) + "_" + std::to_string((int)adaptiveThreshold);
-        auto consoleFilename = consolePath + "/" + outputName + ".txt";
-        if (!forceRewrite && std::filesystem::exists(consoleFilename)) {
-            std::cout << "file already exists, skip:" << consoleFilename << std::endl;
-            continue;
-        }
-
-        std::ofstream consoleFile(consoleFilename);
-        if (!consoleFile || !consoleFile.is_open()) {
-            std::cout << "open console file fail" << std::endl;
-            continue;
-        }
-        std::streambuf* originalCoutBuffer = std::cout.rdbuf();
-        if (writeConsoleToFile) {
-            std::cout.rdbuf(consoleFile.rdbuf()); // 将输出重定向到consoleFile
-        }
-
-        {
-            surface->Update();
-        }
-
-        auto pointCnt = surface->GetOutput()->GetNumberOfPoints();
-        auto cellCnt = surface->GetOutput()->GetNumberOfCells();
-        std::cout << "Number of surface point: " << pointCnt << std::endl;
-        std::cout << "Number of surface cells: " << cellCnt << std::endl;
-        if (!pointCnt || !cellCnt) {
-            std::cout << "No surface generated" << std::endl;
-            continue;
-        }
-
-        std::cout.rdbuf(originalCoutBuffer); // 将输出重定向回来
-        consoleFile.close();
-//        const std::string i_file = "test.obj";
-        {
-            std::string objName = outputPath + "/" + outputName + ".obj";
-            writeToFile(objName, surface);
-            std::cout << "Writing " << objName << std::endl;
+        for (auto &surface : surfaces) {
+            std::cout << "surface:" << (surface ? typeid(*surface).name() : "null") << std::endl;
+            useVTK(isoValue, i_file, false, surface, adaptiveThreshold, forceRewrite, writeConsoleToFile);
         }
 
 
     }
 
-
     cudaFree(ambiguousCasesComplement);
     cudaFree(ambiguousFaces);
-
-
-
-
     return 0;
 }

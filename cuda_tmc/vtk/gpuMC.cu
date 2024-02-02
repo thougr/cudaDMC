@@ -28,8 +28,8 @@
 
 vtkStandardNewMacro(gpuMC);
 #define GLM_FORCE_CUDA
-#include "../glm/glm.hpp"
-#include "MarchingCubes.h"
+#include "../../glm/glm.hpp"
+#include "../MarchingCubes.h"
 
 
 namespace {

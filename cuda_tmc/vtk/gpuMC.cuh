@@ -5,7 +5,7 @@
 #ifndef CUDADMC_GPUMC_CUH
 #define CUDADMC_GPUMC_CUH
 
-#include "../isosurfacesAlgorithm.h"
+#include "../../isosurfacesAlgorithm.h"
 class gpuMC : public isosurfacesAlgorithm {
 public:
     static gpuMC* New();
