@@ -17,8 +17,8 @@
 #include <vtkCellArray.h>
 //#include "UnionFind.h"
 #include "common.cuh"
+#include <stdgpu/functional.h>
 
-template <typename T>
 class UnionFind;
 
 template <class T, class B>
@@ -65,6 +65,8 @@ struct OctreeRepresentative {
     bool canMerge;
     int height;
 
+    int layerId;
+
     // only for debug
     int sign;
 //    std::vector<OctreeRepresentative *> child;
@@ -81,6 +83,7 @@ struct OctreeRepresentative {
         sign = -1;
         canMerge = true;
         height = 0;
+        layerId = -1;
         for (int i = 0; i < 12; i++) {
             edgeIntersection[i] = 0;
         }
@@ -89,7 +92,15 @@ struct OctreeRepresentative {
 
 };
 
-template <typename T>
+//namespace stdgpu {
+//    template<>
+//    struct hash<OctreeRepresentative*> {
+//        size_t operator()(const OctreeRepresentative* representative) const {
+//             return std::hash<std::uintptr_t>()(reinterpret_cast<std::uintptr_t>(representative));
+//        }
+//    };
+//
+//}
 class UnionFind;
 
 template <class T, class B>
@@ -109,9 +120,17 @@ public:
     glm::vec3 normal[8];
     uint8_t sign;
     OctreeRepresentative *representative[12];
+    // use for clustering in parallel
+    OctreeRepresentative *representativeBegin;
+    int clusteredVertexCnt;
+
+    // accumulated representative count
+//    int representativeCnt;
     double isoValue;
     OctreeNodeType type;
     bool collapsible;
+    // index at current layer
+    int idLayer;
 //    bool canMerge;
 
 public:
@@ -127,6 +146,10 @@ public:
         dims[2] = 0;
         sign = 0;
         this->collapsible = false;
+//        representativeCnt = 0;
+        idLayer = -1;
+        representativeBegin = nullptr;
+        clusteredVertexCnt = 0;
 //        this->canMerge = true;
 //        representative.resize(12);
         for (int i = 0; i < 12; i++) {
@@ -144,6 +167,10 @@ public:
         this->type = type;
         this->sign = 0;
         this->collapsible = false;
+//        representativeCnt = 0;
+        idLayer = -1;
+        representativeBegin = nullptr;
+        clusteredVertexCnt = 0;
 //        this->canMerge = true;
 //        representative.resize(12);
         for (int i = 0; i < 12; i++) {
@@ -163,6 +190,10 @@ public:
         this->type = type;
         this->sign = 0;
         this->collapsible = false;
+//        representativeCnt = 0;
+        idLayer = -1;
+        representativeBegin = nullptr;
+        clusteredVertexCnt = 0;
 //        this->canMerge = true;
 //        representative.resize(12);
         for (int i = 0; i < 12; i++) {

@@ -36,6 +36,7 @@ vtkStandardNewMacro(myGPUMDMC);
 #include "cuda_runtime.h"
 #include <cuda_runtime_api.h>
 #include <driver_types.h>
+#include "../UnionFind.cuh"
 
 __host__ __device__ glm::vec3 convertToRelative(Direction dir) {
     glm::vec3 v(0, 0, 0);
@@ -97,6 +98,8 @@ __device__ bool addVertexCnt(Octree<T,B> *root, Octree<T,B> *templateRoot,  doub
     auto contoursTable = &r_pattern[(int)sign * 17];
     auto numContours = contoursTable[0];
     atomicAdd(verticesCnt, numContours);
+    root->clusteredVertexCnt = numContours;
+//    root->representativeCnt = numContours;
     return true;
 }
 
@@ -151,6 +154,7 @@ __global__ void generateLeafNodes(VoxelsData<T> *voxelsData, Octree<T,B> *leafNo
         auto p2Index = position2Index(region.origin, voxelsData->dims);
         leaf.maxScalar = voxelsData->scalars[p2Index];
         leaf.minScalar = leaf.maxScalar;
+        leaf.idLayer = i;
         for (int j = 0; j < 8; j++) {
             glm::u32vec3 verticesPos = region.origin + device_localVerticesPos[j];
 //            verticesPos.x += localVerticesPos[j].x;
@@ -226,10 +230,12 @@ __global__ void generateInternalNodes(VoxelsData<T> *voxelsData, Octree<T,B> *in
         leaf.region = region;
         leaf.type = OctreeNodeType::Node_Internal;
         leaf.isoValue = isovalue;
+        leaf.idLayer = i;
 
         T maxScalar = voxelsData->scalars[position2Index(region.origin, voxelsData->dims)];
         T minScalar = maxScalar;
         unsigned childrenSize = regionSize / 2u;
+        int verticesSum = 0;
         for (int j = 0; j < 8; j++) {
             glm::u32vec3 relativeOrigin = origin + orderOrigin[j] * childrenSize;
             if (relativeOrigin.x >= voxelsData->cubeDims.x || relativeOrigin.y >= voxelsData->cubeDims.y || relativeOrigin.z >= voxelsData->cubeDims.z) {
@@ -248,11 +254,14 @@ __global__ void generateInternalNodes(VoxelsData<T> *voxelsData, Octree<T,B> *in
                 minScalar = leaf.children[j]->minScalar;
             }
             leaf.children[j]->parent = &leaf;
+//            verticesSum += leaf.children[j]->representativeCnt;
         }
         leaf.maxScalar = maxScalar;
         leaf.minScalar = minScalar;
         if (leaf.maxScalar < isovalue || leaf.minScalar > isovalue) {
             leaf.type = Node_None;
+        } else {
+//            leaf.representativeCnt = verticesSum;
         }
     }
 }
@@ -289,6 +298,8 @@ __global__ void calculateVerticesCnt(Octree<T,B> *leafNodes, int size, int *vert
             vs[curCnt++] = representative;
             atomicAdd(verticesCnt, 1);
         }
+//        leaf->representativeCnt = curCnt;
+//        leaf->clusteredVertexCnt = curCnt;
 
     }
 }
@@ -591,6 +602,456 @@ __global__ void generateQuad(VoxelsData<T> *voxelsData, Octree<T,B> *leafNodes, 
     }
 }
 
+//template<class T, class B>
+//__device__ void handleAmbiguous(Octree *root) {
+//    auto sign = root->sign;
+//    if (ambiguousCasesComplement.find(sign) == ambiguousCasesComplement.end()) {
+//        // not ambiguous case
+//        return;
+//    }
+//    auto dir = ambiguousFaces.at(~sign);
+//    Direction direction = convertToDirection(dir);
+//    // new tree has not been built completely, so use template tree
+//    auto neighbor = findNeighbor(root, direction);
+//    if (!neighbor) {
+//        return;
+//    }
+//    auto neighborSign = neighbor->sign;
+//    if (ambiguousCasesComplement.find(neighborSign) != ambiguousCasesComplement.end()) {
+//        // two adjacent ambiguous faces can be handled properly
+//        return;
+//    }
+//    std::unordered_set<OctreeRepresentative*> vs;
+//    auto f = e_face[convertToFace(direction)];
+//    for (int j = 0; j < 4; j++) {
+//        vs.insert(root->representative[f[j]]);
+//    }
+//    if (vs.size() != 1) {
+//        std::cout << "octree representative error happen" << std::endl;
+//        return;
+//    }
+//    auto ambVertex = *vs.begin();
+//    auto face = convertToFace(reverseDirection(direction));
+//    auto edges = e_face[face];
+//    vs.clear();
+//    for (int j = 0; j < 4; j++) {
+//        vs.insert(neighbor->representative[edges[j]]);
+//    }
+//    if (vs.size() != 2) {
+//        std::cout << "octree representative error happen!!" << std::endl;
+//        return;
+//    }
+//    auto commonV1 = findCommonAncestor(*vs.begin(), *std::next(vs.begin()));
+//    if (!commonV1) {
+//        // not clustering to a vertex
+//        return;
+//    }
+//    auto commonV2 = findCommonAncestor(commonV1, ambVertex);
+//    while (commonV1 && commonV1 != commonV2) {
+//        commonV1->collapsible = false;
+//        commonV1 = commonV1->parent;
+//    }
+//}
+
+
+//template<class T, class B>
+//__device__ void cluster(const Octree<T,B> *root[4], UnionFind &unionFind, int useOptimization, int dir) {
+//    int minIndex = 0;
+//    long long indices[4] = {-1, -1, -1, -1};
+//    bool flip = false;
+//    bool signChange[4] = {false, false, false, false};
+//
+//    OctreeRepresentative *previous = nullptr;
+//    for (int i = 0; i < 4; i++) {
+//        if (!root[i]) {
+//            continue;
+//        }
+//        const int edge = device_processEdgeMask[dir][i];
+//        int c1 = device_edges2Vertices[edge][0];
+//        int c2 = device_edges2Vertices[edge][1];
+//        auto m1 = (root[i]->sign >> c1) & 1;
+//        auto m2 = (root[i]->sign >> c2) & 1;
+//        if (m1 ^ m2) {
+//            auto vertex = root[i]->representative[edge];
+//            while (vertex->parent) {
+//                vertex = vertex->parent;
+//            }
+//            if (!previous /**&& vertex->canMerge**/ ) {
+//                previous = vertex;
+//            }
+//            unionFind.addElement(vertex->layerId);
+////            if (vertex->canMerge)
+////            unionFind.unionSets(previous->layerId, vertex->layerId);
+//        }
+//    }
+//
+//    for (int i = 0; i < 4; i++) {
+//        if (!root[i]) {
+//            continue;
+//        }
+//        if (useOptimization == 1) {
+////            handleAmbiguous(root[i]);
+//        }
+//    }
+//
+//}
+//
+//template<class T, class B>
+//__global__ void clusterVertex(VoxelsData<T> *voxelsData, Octree<T,B> *leafNodes, int size, int height, UnionFind *unionFinds) {
+//    unsigned stride = gridDim.x * gridDim.y * gridDim.z * blockDim.x * blockDim.y * blockDim.z;
+//    unsigned blockId = (gridDim.x * blockIdx.y) + blockIdx.x;
+//    unsigned offset = (blockId * (blockDim.x * blockDim.y)) + (threadIdx.y * blockDim.x) + threadIdx.x;
+//    for (int i = offset; i < size; i += stride) {
+//        auto leaf = &leafNodes[i];
+//        if (leaf->type == Node_None) {
+//            continue;
+//        }
+//        Octree<T,B> *parent = leaf;
+////        int parentSize = 1;
+//        for (int j = 0; j < height; j++) {
+//            parent = parent->parent;
+////            parentSize *= 2;
+//        }
+//        Octree<T,B> *grandparent = parent->parent;
+//        auto idLayer = grandparent->idLayer;
+//        auto &uf = unionFinds[idLayer];
+//        auto region = leaf->region;
+//        auto parentRegion = parent->region;
+//        auto rootRegion = grandparent->region;
+//        auto pointNotOnFace = [&] (glm::u32vec3 p, glm::u32vec3 origin, glm::u32vec3 size) -> bool {
+//            return p.x != origin.x && p.y != origin.y && p.z != origin.z
+//                   && p.x != origin.x + size.x  && p.y != origin.y + size.y  && p.z != origin.z + size.z;
+//        };
+//        auto containsRegion = [&] (const Region &region1, const Region &region2) {
+//            return region1.origin.x <= region2.origin.x && region1.origin.y <= region2.origin.y && region1.origin.z <= region2.origin.z
+//                   && region1.origin.x + region1.size.x >= region2.origin.x + region2.size.x
+//                   && region1.origin.y + region1.size.y >= region2.origin.y + region2.size.y
+//                   && region1.origin.z + region1.size.z >= region2.origin.z + region2.size.z;
+//        };
+//        for (int j = 0; j < 12; j++) {
+//            auto v = leaf->representative[j];
+//            if (v == nullptr) {
+//                continue;
+//            }
+//            auto v0 = device_edges2Vertices[j][0];
+//            auto v1 = device_edges2Vertices[j][1];
+//            auto l0 = device_localVerticesPos[v0];
+//            auto l1 = device_localVerticesPos[v1];
+//            auto p0 = region.origin + l0;
+//            auto p1 = region.origin + l1;
+//            if (pointNotOnFace(p0, parentRegion.origin, parentRegion.size) || pointNotOnFace(p1, parentRegion.origin, parentRegion.size)) {
+//                continue;
+//            }
+//            const Octree<T,B> *neighbourCheck[4] = {nullptr, nullptr, nullptr, nullptr};
+//            int dir = 0;
+//            if (l0.x != l1.x) {
+//                dir = 0;
+//                neighbourCheck[0] = getNeighbour(voxelsData, leafNodes, {0, -1, -1}, p0);
+//
+//                neighbourCheck[1] = getNeighbour(voxelsData, leafNodes, {0, -1, 0}, p0);
+//                neighbourCheck[2] = getNeighbour(voxelsData, leafNodes, {0, 0, -1}, p0);
+//                neighbourCheck[3] = getNeighbour(voxelsData, leafNodes, {0, 0, 0}, p0);
+//
+//            }
+//            if (l0.y != l1.y) {
+//                dir = 1;
+//                neighbourCheck[0] = getNeighbour(voxelsData, leafNodes, {-1, 0, -1}, p0);
+//                neighbourCheck[1] = getNeighbour(voxelsData, leafNodes, {0, 0, -1}, p0);
+//                neighbourCheck[2] = getNeighbour(voxelsData, leafNodes, {-1, 0, 0}, p0);
+//                neighbourCheck[3] = getNeighbour(voxelsData, leafNodes, {0, 0, 0}, p0);
+//
+//            }
+//            if (l0.z != l1.z) {
+//                dir = 2;
+//                neighbourCheck[0] = getNeighbour(voxelsData, leafNodes, {-1, -1, 0}, p0);
+//                neighbourCheck[1] = getNeighbour(voxelsData, leafNodes, {-1, 0, 0}, p0);
+//                neighbourCheck[2] = getNeighbour(voxelsData, leafNodes, {0, -1, 0}, p0);
+//                neighbourCheck[3] = getNeighbour(voxelsData, leafNodes, {0, 0, 0}, p0);
+//            }
+//            for (int z = 0; z < 4; z++) {
+//                if (!containsRegion(rootRegion, neighbourCheck[z]->region)) {
+//                    neighbourCheck[z] = nullptr;
+//                }
+//
+//            }
+//            cluster(neighbourCheck, uf, 1, dir);
+//
+//        }
+//    }
+//}
+//
+//template<class T, class B>
+//__global__ void addIsolateVertex(VoxelsData<T> *voxelsData, Octree<T,B> *internalNodes, int size,
+//                                    UnionFind *unionFinds, int *representativesIndex) {
+//    unsigned stride = gridDim.x * gridDim.y * gridDim.z * blockDim.x * blockDim.y * blockDim.z;
+//    unsigned blockId = (gridDim.x * blockIdx.y) + blockIdx.x;
+//    unsigned offset = (blockId * (blockDim.x * blockDim.y)) + (threadIdx.y * blockDim.x) + threadIdx.x;
+//    for (int i = offset; i < size; i += stride) {
+//        auto root = &internalNodes[i];
+//        if (root->type == Node_None) {
+//            continue;
+//        }
+//        auto &unionFind = unionFinds[i];
+//        for (int j = 0; j < 8; j++) {
+//            if (!root->children[j]) {
+//                continue;
+//            }
+//            if (root->children[j]->type == Node_Leaf) {
+//                for (int z = 0; z < 12; z++) {
+//                    auto vertex = root->children[j]->representative[z];
+//                    if (!vertex) {
+//                        continue;
+//                    }
+//                    unionFind.addElement(vertex->layerId);
+//                }
+//            } else {
+//                for (int z = 0; z < root->children[j]->clusteredVertexCnt; z++) {
+//                    auto vertex = &root->children[j]->representativeBegin[z];
+////                if (!vertex) {
+////                    continue;
+////                }
+//                    unionFind.addElement(vertex->layerId);
+//                }
+//
+//            }
+//        }
+//        unionFind.getDisjointSets();
+//    }
+//
+//}
+//
+//
+//template<class T, class B>
+//__global__ void calculateClusterCnt(VoxelsData<T> *voxelsData, Octree<T,B> *internalNodes, int size,
+//                                  UnionFind *unionFinds, int *representativesIndex) {
+//
+//    unsigned stride = gridDim.x * gridDim.y * gridDim.z * blockDim.x * blockDim.y * blockDim.z;
+//    unsigned blockId = (gridDim.x * blockIdx.y) + blockIdx.x;
+//    unsigned offset = (blockId * (blockDim.x * blockDim.y)) + (threadIdx.y * blockDim.x) + threadIdx.x;
+//    for (int i = offset; i < size; i += stride) {
+//        auto root = &internalNodes[i];
+//        if (root->type == Node_None) {
+//            continue;
+//        }
+//        auto &unionFind = unionFinds[i];
+////        for (int j = 0; j < 8; j++) {
+////            if (!root->children[j]) {
+////                continue;
+////            }
+////            if (root->children[j]->type == Node_Leaf) {
+////                for (int z = 0; z < 12; z++) {
+////                    auto vertex = root->children[j]->representative[z];
+////                    if (!vertex) {
+////                        continue;
+////                    }
+////                    unionFind.addElement(vertex->layerId);
+////                }
+////            } else {
+////                for (int z = 0; z < root->children[j]->representativeCnt; z++) {
+////                    auto vertex = &root->children[j]->representativeBegin[z];
+//////                if (!vertex) {
+//////                    continue;
+//////                }
+////                    unionFind.addElement(vertex->layerId);
+////                }
+////
+////            }
+////        }
+//
+////        unionFind.getDisjointSets();
+//        auto &result = unionFind.result;
+//        auto &result_parent = unionFind.result_parent;
+////    bool allCollapsible = true;
+//        int vertexCnt = 0;
+//        int preParent = -1;
+//        int index = -1;
+//        for (int j = 0; j < unionFind.count[0]; j++) {
+//            if (result_parent[j] != preParent) {
+//                index = atomicAdd(representativesIndex, 1);
+//                vertexCnt++;
+//                preParent = result_parent[j];
+//            }
+//        }
+//
+//    }
+//}
+//
+//
+//
+//template<class T, class B>
+//__global__ void clusterFromParent(VoxelsData<T> *voxelsData, Octree<T,B> *internalNodes, int size, int height,
+//                                  UnionFind *unionFinds, OctreeRepresentative *representatives,
+//                                  int *representativesIndex, double threshold) {
+//
+//    // cluster begin
+//    // the vertex that are not in the unionFind are need to be added to a one-element new set
+//    unsigned stride = gridDim.x * gridDim.y * gridDim.z * blockDim.x * blockDim.y * blockDim.z;
+//    unsigned blockId = (gridDim.x * blockIdx.y) + blockIdx.x;
+//    unsigned offset = (blockId * (blockDim.x * blockDim.y)) + (threadIdx.y * blockDim.x) + threadIdx.x;
+//    for (int i = offset; i < size; i += stride) {
+//        auto root = &internalNodes[i];
+//        if (root->type == Node_None) {
+//            continue;
+//        }
+//        auto &unionFind = unionFinds[i];
+////        for (int j = 0; j < 8; j++) {
+////            if (!root->children[j]) {
+////                continue;
+////            }
+////            if (root->children[j]->type == Node_Leaf) {
+////                for (int z = 0; z < 12; z++) {
+////                    auto vertex = root->children[j]->representative[z];
+////                    if (!vertex) {
+////                        continue;
+////                    }
+////                    unionFind.addElement(vertex->layerId);
+////                }
+////            } else {
+////                for (int z = 0; z < root->children[j]->representativeCnt; z++) {
+////                    auto vertex = &root->children[j]->representativeBegin[z];
+//////                if (!vertex) {
+//////                    continue;
+//////                }
+////                    unionFind.addElement(vertex->layerId);
+////                }
+////
+////            }
+////        }
+////
+////        unionFind.getDisjointSets();
+//        auto &result = unionFind.result;
+//        auto &result_parent = unionFind.result_parent;
+////    bool allCollapsible = true;
+//        int vertexCnt = 0;
+//        int preParent = -1;
+//        int index = -1;
+//        root->collapsible = true;
+//        for (int j = 0; j < unionFind.count[0]; ) {
+//            if (result_parent[j] != preParent) {
+//                index = atomicAdd(representativesIndex, 1);
+//                vertexCnt++;
+//                preParent = result_parent[j];
+//            }
+//            svd::QefSolver qefSolver;
+//            glm::vec3 normal(0.f, 0.f, 0.f);
+//            int edgeIntersection[12];
+//            int internalIntersection = 0;
+//            int euler = 0;
+//            for (int z = 0; z < 12; z++) {
+//                edgeIntersection[z] = 0;
+//            }
+//            bool canMerge = true;
+//            OctreeRepresentative *newRepresentative = &representatives[index];
+//            *newRepresentative = OctreeRepresentative();
+//            if (j == 0) {
+//                root->representativeBegin = newRepresentative;
+//            }
+//            while (result_parent[j] == preParent && j < unionFind.count[0]) {
+//                auto node = &representatives[result[j]];
+//                for (int z = 0; z < 3; z++) {
+//                    int edge = externalEdges[node->cellIndex][z];
+//                    edgeIntersection[edge] += node->edgeIntersection[edge];
+//                }
+//
+//                qefSolver.add(node->qef);
+//                normal += node->averageNormal;
+//                for (int z = 0; z < 9; z++) {
+//                    int edge = internalEdge[node->cellIndex][z];
+//                    internalIntersection += node->edgeIntersection[edge];
+//                }
+//                euler += node->euler;
+//                if (!node->canMerge) {
+//                    canMerge = false;
+//                }
+//                node->parent = newRepresentative;
+//                j++;
+//            }
+//            svd::Vec3 qefPosition;
+//            qefSolver.solve(qefPosition, QEF_ERROR, QEF_SWEEPS, QEF_ERROR);
+//            auto error = qefSolver.getError();
+//            glm::vec3 position(qefPosition.x, qefPosition.y, qefPosition.z);
+//
+//            if (!inRegion(position, root->region)) {
+//                const auto &mp = qefSolver.getMassPoint();
+//                position = glm::vec3(mp.x, mp.y, mp.z);
+//                error = qefSolver.getError(mp);
+//            }
+//
+//            bool edgeManifold = true;
+//            for (int f = 0; f < 6; f++) {
+//                int intersections = 0;
+//                for (int z = 0; z < 4; z++) {
+//                    intersections += edgeIntersection[e_face[f][z]];
+//                }
+//                if (intersections != 0 && intersections != 2) {
+//                    edgeManifold = false;
+//                    break;
+//                }
+//            }
+//
+//            newRepresentative->position = position;
+//            newRepresentative->qef = qefSolver.getData();
+//            newRepresentative->averageNormal = glm::normalize(normal);
+//            newRepresentative->euler = euler - internalIntersection / 4;
+//            newRepresentative->collapsible = error <= threshold && newRepresentative->euler == 1 && edgeManifold ;
+////        newRepresentative->collapsible = error <= threshold && newRepresentative->euler != 0;
+////        newRepresentative->collapsible = error <= threshold;
+////        newRepresentative->collapsible =  newRepresentative->euler > 0  ;
+//
+////        newRepresentative->collapsible = edgeManifold;
+//            newRepresentative->cellIndex = root->index;
+//            newRepresentative->internalInters = internalIntersection;
+//            newRepresentative->canMerge = canMerge;
+//            newRepresentative->height = root->height;
+//            newRepresentative->layerId = index;
+//            if (!newRepresentative->collapsible || !canMerge) {
+//                root->collapsible = false;
+//            }
+//            for (int z = 0; z < 12; z++) {
+//                newRepresentative->edgeIntersection[z] = edgeIntersection[z];
+//            }
+//        }
+//        root->clusteredVertexCnt = vertexCnt;
+//
+//    }
+//
+//}
+//
+//template<class T, class B>
+//__global__ void createUnionFinds(UnionFind* arr, Octree<T, B> *internalNodes, int size) {
+//    unsigned stride = gridDim.x * gridDim.y * gridDim.z * blockDim.x * blockDim.y * blockDim.z;
+//    unsigned blockId = (gridDim.x * blockIdx.y) + blockIdx.x;
+//    unsigned offset = (blockId * (blockDim.x * blockDim.y)) + (threadIdx.y * blockDim.x) + threadIdx.x;
+//    for (int i = offset; i < size; i += stride) {
+//        auto root = &internalNodes[i];
+//        if (root->type == Node_None) {
+//            continue;
+//        }
+//        int sum = 0;
+//        for (int j = 0; j < 8; j++) {
+//            if (!root->children[j]) {
+//                continue;
+//            }
+//            sum += root->children[j]->clusteredVertexCnt;
+//        }
+//        new(&arr[i]) UnionFind(sum);
+//    }
+//}
+//
+//template<class T, class B>
+//__global__ void deleteUnionFinds(UnionFind* arr, Octree<T, B> *internalNodes, int size) {
+//    unsigned stride = gridDim.x * gridDim.y * gridDim.z * blockDim.x * blockDim.y * blockDim.z;
+//    unsigned blockId = (gridDim.x * blockIdx.y) + blockIdx.x;
+//    unsigned offset = (blockId * (blockDim.x * blockDim.y)) + (threadIdx.y * blockDim.x) + threadIdx.x;
+//    for (int i = offset; i < size; i += stride) {
+//        auto root = &internalNodes[i];
+//        if (root->type == Node_None) {
+//            continue;
+//        }
+//        arr[i].~UnionFind();
+//    }
+//}
+
 namespace {
 
     struct ComputeGradientWorker
@@ -684,6 +1145,8 @@ namespace {
 
 
             OctreeType **everyHeightNodes = new OctreeType*[height+1];
+            int *nodesCnt = new int[height +1];
+            nodesCnt[0] = leafNum;
             everyHeightNodes[0] = leafNodes;
             unsigned regionSize = 1;
             glm::u32vec3 childrenSize = size;
@@ -695,6 +1158,7 @@ namespace {
                 int nodeNums = curSize.x * curSize.y * curSize.z;
                 long long nByte = 1ll * sizeof(OctreeType) * nodeNums;
                 cudaMallocManaged((void**)&nodes, nByte);
+                nodesCnt[h] = nodeNums;
                 cudaMemset(nodes, 0, nByte);
                 generateInternalNodes<<<grid, block>>>(deviceData, nodes, everyHeightNodes[h-1], nodeNums, height - h, h, value, childrenSize, curSize, regionSize);
                 cudaDeviceSynchronize();
@@ -722,6 +1186,90 @@ namespace {
 //                OctreeType::clusterCell(isoTree, adaptiveThreshold, 1);
 //            }
 //            OctreeType::generateVerticesIndices(isoTree, locator, newScalars);
+
+//            OctreeRepresentative **everyHeightVertices = new OctreeRepresentative *[height+1];
+//            for (int i = 0; i <= height; i++) {
+//                everyHeightVertices[i] = nullptr;
+//            }
+            if (adaptiveThreshold != 0) {
+//                for (int h = 0; h < height; h++) {
+//                    std::cout << "cluster 层高:" << h << "," << "开始创建unionFind:" << nodesCnt[h+1] << std::endl;
+//                    UnionFind * unionFinds;
+//                    long long nByte = 1ll * sizeof(UnionFind) * nodesCnt[h+1];
+//                    cudaMallocManaged((void**)&unionFinds, nByte);
+//                    createUnionFinds<<<grid, block>>>(unionFinds, everyHeightNodes[h+1], nodesCnt[h+1]);
+////                    for (int cur = 0; cur < nodesCnt[h+1]; cur++) {
+////                        auto root = &everyHeightNodes[h+1][cur];
+////                        if (root->type == Node_None) {
+////                            continue;
+////                        }
+////                        int sum = 0;
+////                        for (int j = 0; j < 8; j++) {
+////                            if (!root->children[j]) {
+////                                continue;
+////                            }
+////                            sum += root->children[j]->clusteredVertexCnt;
+////                        }
+////                        new (&unionFinds[cur]) UnionFind(sum);
+////                    }
+//                    auto error = cudaDeviceSynchronize();
+//                    // print the error
+//                    if (error != cudaSuccess) {
+//                        std::cout << cudaGetErrorString(error) << std::endl;
+//                    }
+//                    std::cout << "cluster 层高:" << h << "," << "成功创建unionFind:" << nodesCnt[h+1] << std::endl;
+//                    clusterVertex<<<grid, block>>>(deviceData, leafNodes, leafNum, h, unionFinds);
+//                    error = cudaDeviceSynchronize();
+//                    // print the error
+//                    if (error != cudaSuccess) {
+//                        std::cout << cudaGetErrorString(error) << std::endl;
+//                    }
+//                    std::cout << "cluster 层高:" << h << "," << "clusterVertex"  << std::endl;
+//                    exit(0);
+//                    OctreeRepresentative *representatives = nullptr;
+//                    int *representativesIndex;
+//                    int *representativesCnt;
+//                    cudaMallocManaged(&representativesIndex, sizeof(int));
+//                    cudaMemset(representativesIndex, 0, sizeof(int));
+//                    cudaMallocManaged(&representativesCnt, sizeof(int));
+//                    cudaMemset(representativesCnt, 0, sizeof(int));
+//                    addIsolateVertex<<<grid, block>>>(deviceData, everyHeightNodes[h+1], nodesCnt[h+1], unionFinds, representativesIndex);
+//                    cudaDeviceSynchronize();
+//                    std::cout << "cluster 层高:" << h << "," << "addIsolateVertex"  << std::endl;
+//                    for (int cur = 0; cur < nodesCnt[h+1]; cur++) {
+////                        unionFinds[cur].getDisjointSets();
+//                        auto &uf = unionFinds[cur];
+////                        thrust::device_ptr<int> result(uf.result);
+////                        thrust::device_ptr<int> result_parent(uf.result_parent);
+//                        thrust::sort_by_key(uf.result_parent, uf.result_parent + uf.count[0], uf.result);
+//                    }
+//                    calculateClusterCnt<<<grid, block>>>(deviceData, everyHeightNodes[h+1], nodesCnt[h+1], unionFinds, representativesCnt);
+//                    cudaDeviceSynchronize();
+//                    std::cout << "cluster 层高:" << h << "," << "顶点个数:" << representativesCnt[0] << std::endl;
+//                    nByte = 1ll * sizeof(OctreeRepresentative*) * representativesCnt[0];
+//                    cudaMallocManaged((void**)&representatives, nByte);
+//                    everyHeightVertices[h+1] = representatives;
+//
+//                    clusterFromParent<<<grid, block>>>(deviceData, everyHeightNodes[h+1], nodesCnt[h+1], h+1, unionFinds,
+//                                                       representatives, representativesIndex, adaptiveThreshold);
+//                    std::cout << "cluster 层高:" << h << "," << "实际顶点个数:" << representativesIndex[0] << std::endl;
+//                    cudaDeviceSynchronize();
+////                    deleteUnionFinds<<<grid, block>>>(unionFinds, everyHeightNodes[h+1], nodesCnt[h+1]);
+//                    for (int cur = 0; cur < nodesCnt[h+1]; cur++) {
+//                        unionFinds[cur].~UnionFind();
+//                    }
+//                    cudaFree(unionFinds);
+//                    cudaFree(representativesIndex);
+//                    cudaFree(representativesCnt);
+//                }
+            }
+            {
+                auto end = std::chrono::high_resolution_clock::now();
+                std::chrono::duration<double> duration = end - start;
+                double seconds = duration.count();
+                start = end;
+                std::cout << "clustering vertex: " << seconds << " 秒" << std::endl;
+            }
             int *d_count;
             cudaMallocManaged(&d_count, sizeof(int ));
             cudaMemset(d_count, 0, sizeof(int ));
@@ -808,8 +1356,14 @@ namespace {
             // free the everyHeightNodes
             for (int i = 0; i <= height; i++) {
                 cudaFree(everyHeightNodes[i]);
+                if (everyHeightNodes[i]) {
+                    cudaFree(everyHeightVertices[i]);
+                }
+
             }
             delete []everyHeightNodes;
+            delete []everyHeightVertices;
+            delete []nodesCnt;
             cudaFree(d_count);
             cudaFree(vertices);
             cudaFree(vertexIndex);

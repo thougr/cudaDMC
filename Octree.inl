@@ -361,7 +361,7 @@ namespace {
         return ancestor1;
     }
 
-    __device__ bool isAmbiguousCase(uint8_t sign) {
+    __host__ __device__ bool isAmbiguousCase(uint8_t sign) {
         return ambiguousCasesComplement[sign];
     }
 
@@ -810,6 +810,7 @@ void Octree<T, B>::calculateAccurateRepresentative(Octree *root, OctreeRepresent
         }
         // TODO choose qefPos or pt
         OctreeRepresentative *representative = &allVertex[index + i - 1];
+        *representative = OctreeRepresentative();
 //        OctreeRepresentative *representative = allVertex + 4 * globalIndex + i - 1;
         representative->averageNormal = glm::normalize(averageNormal);
         representative->qef = qefSolver.getData();
@@ -817,6 +818,7 @@ void Octree<T, B>::calculateAccurateRepresentative(Octree *root, OctreeRepresent
         representative->cellIndex = root->index;
         representative->sign = sign;
         representative->canMerge = canMerge;
+        representative->layerId = index + i - 1;
         for (int j = 0; j < 12; j++) {
             representative->edgeIntersection[j] = edgeIntersection[j];
         }

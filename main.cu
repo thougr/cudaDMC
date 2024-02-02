@@ -37,8 +37,9 @@ int main() {
 //            {"data/carp.nhdr",1150.5}
     };
 
-    double adaptiveThreshold = 0;
+    double adaptiveThreshold = 100.f;
     bool forceRewrite = true;
+    bool writeConsoleToFile = false;
     for (auto &file : files) {
         auto i_file = file.first;
         double isoValue = file.second;
@@ -82,7 +83,9 @@ int main() {
             continue;
         }
         std::streambuf* originalCoutBuffer = std::cout.rdbuf();
-        std::cout.rdbuf(consoleFile.rdbuf()); // 将输出重定向到consoleFile
+        if (writeConsoleToFile) {
+            std::cout.rdbuf(consoleFile.rdbuf()); // 将输出重定向到consoleFile
+        }
 
         {
             surface->Update();
