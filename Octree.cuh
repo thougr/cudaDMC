@@ -125,6 +125,30 @@ public:
 //    bool canMerge;
 
 public:
+    __host__ __device__ void init() {
+        parent = nullptr;
+        for (int i = 0; i < 8; i++) {
+            children[i] = nullptr;
+        }
+        depth = 0;
+        index = 0;
+        dims[0] = 0;
+        dims[1] = 0;
+        dims[2] = 0;
+        sign = 0;
+        this->collapsible = false;
+//        representativeCnt = 0;
+        idLayer = -1;
+        representativeBegin = nullptr;
+        clusteredVertexCnt = 0;
+//        this->canMerge = true;
+//        representative.resize(12);
+        for (int i = 0; i < 12; i++) {
+            representative[i] = nullptr;
+        }
+        clusteredVertex = nullptr;
+
+    }
     __host__ __device__ Octree() {
         parent = nullptr;
         for (int i = 0; i < 8; i++) {

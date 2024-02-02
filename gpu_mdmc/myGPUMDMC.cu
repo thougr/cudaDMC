@@ -128,8 +128,9 @@ __global__ void generateLeafNodes(VoxelsData<T> *voxelsData, Octree<T,B> *leafNo
 //    unsigned blockId = (gridDim.x * gridDim.y * blockIdx.z) + (gridDim.x * blockIdx.y) + blockIdx.x;
 //    unsigned offset = (blockId * (blockDim.x * blockDim.y * blockDim.z)) + (threadIdx.z * (blockDim.x * blockDim.y)) + (threadIdx.y * blockDim.x) + threadIdx.x;
     for (int i = offset; i < size;i += stride) {
-        leafNodes[i] = Octree<T,B>();
+//        leafNodes[i] = Octree<T,B>();
         auto &leaf = leafNodes[i];
+        leaf.init();
 
         leaf.type = OctreeNodeType::Node_Leaf;
         leaf.height = 0;
@@ -210,8 +211,9 @@ __global__ void generateInternalNodes(VoxelsData<T> *voxelsData, Octree<T,B> *in
     unsigned blockId = (gridDim.x * blockIdx.y) + blockIdx.x;
     unsigned offset = (blockId * (blockDim.x * blockDim.y)) + (threadIdx.y * blockDim.x) + threadIdx.x;
     for(int i = offset; i < size;i += stride){
-        internalNodes[i] = Octree<T,B>();
+//        internalNodes[i] = Octree<T,B>();
         auto &leaf = internalNodes[i];
+        leaf.init();
         leaf.depth = depth;
         leaf.height = height;
         unsigned x = i % dims.x;
@@ -665,7 +667,7 @@ namespace {
 //                        .voxelsCnt = size.x * size.y * size.z, .conceptualSize = conceptualSize};
                 long long nByte = 1ll * sizeof(OctreeType) * leafNum;
                 cudaMallocManaged((void**)&leafNodes, nByte);
-                cudaMemset(leafNodes, 0, nByte);
+//                cudaMemset(leafNodes, 0, nByte);
                 cudaMallocManaged(&leafVertexCnt, sizeof(int));
                 cudaMemset(leafVertexCnt, 0, sizeof(int));
                 cudaMallocManaged(&leafVertexIndex, sizeof(int));
@@ -709,7 +711,7 @@ namespace {
                 long long nByte = 1ll * sizeof(OctreeType) * nodeNums;
                 cudaMallocManaged((void**)&nodes, nByte);
                 nodesCnt[h] = nodeNums;
-                cudaMemset(nodes, 0, nByte);
+//                cudaMemset(nodes, 0, nByte);
                 generateInternalNodes<<<grid, block>>>(deviceData, nodes, everyHeightNodes[h-1], nodeNums, height - h, h, value, childrenSize, curSize, regionSize);
                 cudaDeviceSynchronize();
                 everyHeightNodes[h] = nodes;

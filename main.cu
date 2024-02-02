@@ -116,9 +116,9 @@ int main() {
         auto i_file = file.first;
         double isoValue = file.second;
         std::vector<vtkSmartPointer<isosurfacesAlgorithm>> surfaces = {
-//        vtkNew<myGPUMDMC>(),
+        vtkNew<myGPUMDMC>(),
 //            vtkNew<gpuMC>(),
-                    vtkNew<gpuDMC>()
+//                    vtkNew<gpuDMC>()
         };
 
         for (auto &surface : surfaces) {
